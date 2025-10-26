@@ -1,0 +1,39 @@
+heartbeat.monitors:
+  - type: http
+    id: wordpress_frontend
+    name: "Uptime WP Frontend"
+    schedule: "@every 15s"
+    urls: ["http://nginx/"]
+    check.request:
+      method: "GET"
+    check.response:
+      status: 200
+      body: ".*"    # simple
+    ipv4: true
+    mode: any
+
+  - type: http
+    id: wordpress_health
+    name: "Nginx Healthz"
+    schedule: "@every 15s"
+    urls: ["http://nginx/healthz"]
+    check.response.status: 200
+
+output.console:
+  pretty: true
+
+# Si luego quieres ELK, comenta lo de console y habilita esto:
+# output.elasticsearch:
+#   hosts: ["http://elasticsearch:9200"]
+# setup.kibana:
+#   host: "http://kibana:5601"
+
+processors:
+  - add_host_metadata: ~
+  - add_cloud_metadata: ~
+  - add_fields:
+      target: project
+      fields:
+        name: fintech-wp
+logging.to_files: false
+

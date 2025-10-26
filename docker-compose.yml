@@ -1,0 +1,98 @@
+name: fintech-wp-stack
+
+networks:
+  frontend:
+  backend:
+
+volumes:
+  db_data:
+  wp_data:          # Volumen con TODO /var/www/html de WordPress
+  nginx_logs:
+  heartbeat_data:
+
+services:
+  db:
+    build: ./mariadb
+    container_name: db
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
+      MARIADB_DATABASE: ${MARIADB_DATABASE}
+      MARIADB_USER: ${MARIADB_USER}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD}
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./mariadb/my.cnf:/etc/mysql/conf.d/my.cnf:ro
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb-admin ping -h127.0.0.1 -uroot -p\"$MARIADB_ROOT_PASSWORD\" || exit 1"]
+      start_period: 90s
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  wordpress:
+    build: ./wordpress
+    container_name: wordpress
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_NAME: ${MARIADB_DATABASE}
+      WORDPRESS_DB_USER: ${MARIADB_USER}
+      WORDPRESS_DB_PASSWORD: ${MARIADB_PASSWORD}
+    volumes:
+      # Montamos TODO el docroot para que Nginx lo vea también
+      - wp_data:/var/www/html
+      - ./wordpress/php-custom.ini:/usr/local/etc/php/conf.d/php-custom.ini:ro
+    expose:
+      - "9000"  # php-fpm (FastCGI)
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "php -v >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  nginx:
+    build: ./nginx
+    container_name: nginx
+    restart: unless-stopped
+    depends_on:
+      - wordpress
+    ports:
+      - "80:80"
+      # - "443:443"  # habilita si configuras TLS
+    volumes:
+      - nginx_logs:/var/log/nginx
+      - wp_data:/var/www/html:ro
+      - ./nginx/conf.d/wordpress.conf:/etc/nginx/conf.d/wordpress.conf:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # Anula el vhost por defecto del contenedor base
+      - /dev/null:/etc/nginx/conf.d/default.conf
+    networks:
+      - frontend
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  heartbeat:
+    build: ./heartbeat
+    container_name: heartbeat
+    restart: unless-stopped
+    depends_on:
+      - nginx
+    networks:
+      - frontend
+    volumes:
+      - heartbeat_data:/usr/share/heartbeat/data
+      - ./heartbeat/heartbeat.yml:/usr/share/heartbeat/heartbeat.yml:ro
+    command: ["--strict.perms=false", "-e"]
+
